@@ -5,10 +5,8 @@ Adapted for CS294-112 Fall 2018 by Michael Chang and Soroush Nasiriany
 """
 import numpy as np
 import tensorflow as tf
-import tensorflow_probability as tfp
 import gym
 import logz
-import scipy.signal
 import os
 import time
 import inspect
@@ -487,12 +485,13 @@ class Agent(object):
             arguments:
                 ob_no: shape: (sum_of_path_lengths, ob_dim)
                 ac_na: shape: (sum_of_path_lengths).
-
-            returns:
                 q_n: shape: (sum_of_path_lengths). A single vector for the estimated q values 
                     whose length is the sum of the lengths of the paths
                 adv_n: shape: (sum_of_path_lengths). A single vector for the estimated 
                     advantages whose length is the sum of the lengths of the paths
+
+            returns:
+                nothing
 
         """
         #====================================================================================#
