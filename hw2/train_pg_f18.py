@@ -39,10 +39,11 @@ def build_mlp(input_placeholder, output_size, scope, n_layers, size, activation=
     """
     inputs = input_placeholder
 
-    with tf.variable_scope(scope):
-        for _ in range(n_layers):
+    for layer in range(n_layers):
+        with tf.variable_scope(f"{scope}_{layer}"):
             inputs = tf.layers.dense(inputs=inputs, units=size, activation=activation)
 
+    with tf.variable_scope(f"{scope}_outputs"):
         output_placeholder = tf.layers.dense(inputs=inputs, units=output_size, activation=output_activation)
 
     return output_placeholder
@@ -180,7 +181,7 @@ class Agent(object):
         if self.discrete:
             sy_logits_na = policy_parameters
             # YOUR_CODE_HERE
-            samples = tf.multinomial(logits=sy_logits_na, num_samples=1, dtype=tf.int32) # output of shape [batch_size, num_samples]
+            samples = tf.multinomial(logits=sy_logits_na, num_samples=1) # output of shape [batch_size, num_samples]
             sy_sampled_ac = tf.reshape(samples, [-1]) # flatten to be of shape [batch_size]
         else:
             sy_mean, sy_logstd = policy_parameters
@@ -215,7 +216,7 @@ class Agent(object):
         if self.discrete:
             sy_logits_na = policy_parameters
             # YOUR_CODE_HERE
-            sy_logprob_n = tf.nn.softmax_cross_entropy_with_logits_v2(labels=sy_ac_na, logits=sy_logits_na) # ???
+            sy_logprob_n = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=sy_ac_na, logits=sy_logits_na) # ???
         else:
             sy_mean, sy_logstd = policy_parameters
             # YOUR_CODE_HERE
@@ -709,7 +710,7 @@ def main():
         processes.append(p)
         # if you comment in the line below, then the loop will block 
         # until this process finishes
-        # p.join()
+        p.join()
 
     for p in processes:
         p.join()
