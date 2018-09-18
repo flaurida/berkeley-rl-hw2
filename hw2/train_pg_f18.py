@@ -148,7 +148,7 @@ class Agent(object):
         else:
             # YOUR_CODE_HERE
             sy_mean = build_mlp(sy_ob_no, self.ac_dim, "policy_forward_pass", self.n_layers, self.size)
-            sy_logstd = tf.get_variable("log_std", [self.ac_dim], trainable=True)
+            sy_logstd = tf.Variable(0.25, [self.ac_dim], name="log_std")
             return (sy_mean, sy_logstd)
 
     #========================================================================================#
@@ -186,7 +186,8 @@ class Agent(object):
         else:
             sy_mean, sy_logstd = policy_parameters
             # YOUR_CODE_HERE
-            sy_sampled_ac = sy_mean + sy_logstd * tf.random_normal(sy_mean.shape, mean=0.0, stddev=1.0) # ??? check shape here
+            sy_std = tf.exp(sy_logstd)
+            sy_sampled_ac = sy_mean + sy_std * tf.random_normal(sy_mean.shape, mean=0.0, stddev=1.0) # ??? not sure sampled correctly
         return sy_sampled_ac
 
     #========================================================================================#
@@ -220,7 +221,11 @@ class Agent(object):
         else:
             sy_mean, sy_logstd = policy_parameters
             # YOUR_CODE_HERE
-            dist = tf.distributions.Normal(loc=sy_mean, scale=sy_logstd) # ???
+            dist = tf.distributions.Normal(loc=sy_mean, scale=tf.exp(sy_logstd)) # ???
+            # JON CODE
+            # probabilities = dist.pdf(sy_ac_na)
+
+            # sy_logprob_n = tf.losses.mean_squared_error(labels=sy_ac_na, predictions=probabilities)
             sy_logprob_n = dist.log_prob(sy_ac_na) * -1 # ??? to make negative
         return sy_logprob_n
 
@@ -531,8 +536,6 @@ class Agent(object):
             self.sy_ac_na: ac_na,
             self.sy_adv_n: adv_n,
         })
-
-        # return q_n, adv_n ??? unclear needs to return anything based on how it is called?
 
 
 def train_PG(
