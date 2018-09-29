@@ -39,11 +39,10 @@ def build_mlp(input_placeholder, output_size, scope, n_layers, size, activation=
     """
     inputs = input_placeholder
 
-    for layer in range(n_layers):
-        with tf.variable_scope(f"{scope}_{layer}"):
+    with tf.variable_scope(scope):
+        for layer in range(n_layers):
             inputs = tf.layers.dense(inputs=inputs, units=size, activation=activation)
 
-    with tf.variable_scope(f"{scope}_outputs"):
         output_placeholder = tf.layers.dense(inputs=inputs, units=output_size, activation=output_activation)
 
     return output_placeholder
@@ -83,7 +82,8 @@ class Agent(object):
         self.normalize_advantages = estimate_return_args['normalize_advantages']
 
     def init_tf_sess(self):
-        tf_config = tf.ConfigProto(inter_op_parallelism_threads=1, intra_op_parallelism_threads=1) 
+        tf_config = tf.ConfigProto(inter_op_parallelism_threads=1, intra_op_parallelism_threads=1)
+        tf_config.gpu_options.allow_growth = True
         self.sess = tf.Session(config=tf_config)
         self.sess.__enter__() # equivalent to `with self.sess:`
         tf.global_variables_initializer().run() #pylint: disable=E1101
@@ -148,7 +148,7 @@ class Agent(object):
         else:
             # YOUR_CODE_HERE
             sy_mean = build_mlp(sy_ob_no, self.ac_dim, "policy_forward_pass", self.n_layers, self.size)
-            sy_logstd = tf.Variable(0.25, [self.ac_dim], name="log_std")
+            sy_logstd = tf.get_variable("logstd", shape=[self.ac_dim], trainable=True) 
             return (sy_mean, sy_logstd)
 
     #========================================================================================#
@@ -168,7 +168,7 @@ class Agent(object):
 
             returns:
                 sy_sampled_ac: 
-                    if discrete: (batch_size,)
+                    if discrete: (batch_size)
                     if continuous: (batch_size, self.ac_dim)
 
             Hint: for the continuous case, use the reparameterization trick:
@@ -186,8 +186,9 @@ class Agent(object):
         else:
             sy_mean, sy_logstd = policy_parameters
             # YOUR_CODE_HERE
+            z = tf.random_normal(tf.shape(sy_mean), mean=0.0, stddev=1.0)
             sy_std = tf.exp(sy_logstd)
-            sy_sampled_ac = sy_mean + sy_std * tf.random_normal(sy_mean.shape, mean=0.0, stddev=1.0) # ??? not sure sampled correctly
+            sy_sampled_ac = sy_mean + sy_std * z
         return sy_sampled_ac
 
     #========================================================================================#
@@ -205,9 +206,7 @@ class Agent(object):
                         sy_mean: (batch_size, self.ac_dim)
                         sy_logstd: (self.ac_dim,)
 
-                sy_ac_na: 
-                    if discrete: (batch_size,)
-                    if continuous: (batch_size, self.ac_dim)
+                sy_ac_na: (batch_size, self.ac_dim)
 
             returns:
                 sy_logprob_n: (batch_size)
@@ -219,16 +218,16 @@ class Agent(object):
         if self.discrete:
             sy_logits_na = policy_parameters
             # YOUR_CODE_HERE
-            sy_logprob_n = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=sy_ac_na, logits=sy_logits_na) # ???
+            sy_logprob_n = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=sy_ac_na, logits=sy_logits_na)
         else:
             sy_mean, sy_logstd = policy_parameters
-            # YOUR_CODE_HERE
-            dist = tf.distributions.Normal(loc=sy_mean, scale=tf.exp(sy_logstd)) # ???
-            # JON CODE
-            # probabilities = dist.pdf(sy_ac_na)
 
-            # sy_logprob_n = tf.losses.mean_squared_error(labels=sy_ac_na, predictions=probabilities)
-            sy_logprob_n = dist.log_prob(sy_ac_na) * -1 # ??? to make negative
+            # calculate the z score of the sampled actions under the policy
+            sy_z = (sy_ac_na - sy_mean) / tf.exp(sy_logstd)
+
+            # this maximizes likelihood by pushing z towards 0, the mean of the distribution
+            sy_logprob_n = 0.5 * tf.reduce_sum(tf.square(sy_z), axis=1)
+
         return sy_logprob_n
 
     def build_computation_graph(self):
@@ -280,7 +279,6 @@ class Agent(object):
         # neural network baseline. These will be used to fit the neural network baseline. 
         #========================================================================================#
         if self.nn_baseline:
-            raise NotImplementedError
             self.baseline_prediction = tf.squeeze(build_mlp(
                                     self.sy_ob_no, 
                                     1, 
@@ -288,8 +286,8 @@ class Agent(object):
                                     n_layers=self.n_layers,
                                     size=self.size))
             # YOUR_CODE_HERE
-            self.sy_target_n = None
-            baseline_loss = None
+            self.sy_target_n = tf.placeholder(shape=[None], name="target", dtype=tf.float32)
+            baseline_loss = tf.losses.mean_squared_error(labels=self.sy_target_n, predictions=self.baseline_prediction)
             self.baseline_update_op = tf.train.AdamOptimizer(self.learning_rate).minimize(baseline_loss)
 
     def sample_trajectories(self, itr, env):
@@ -447,8 +445,8 @@ class Agent(object):
             # Hint #bl1: rescale the output from the nn_baseline to match the statistics
             # (mean and std) of the current batch of Q-values. (Goes with Hint
             # #bl2 in Agent.update_parameters.
-            raise NotImplementedError
-            b_n = None # YOUR CODE HERE
+            b_n = self.sess.run(self.baseline_prediction, feed_dict={self.sy_ob_no: ob_no}) # YOUR CODE HERE
+            b_n = b_n * q_n.std() + q_n.mean()
             adv_n = q_n - b_n
         else:
             adv_n = q_n.copy()
@@ -518,8 +516,8 @@ class Agent(object):
             # Agent.compute_advantage.)
 
             # YOUR_CODE_HERE
-            raise NotImplementedError
-            target_n = None 
+            target_n = (q_n - q_n.mean()) / q_n.std() 
+            self.sess.run(self.baseline_update_op, feed_dict={self.sy_target_n: target_n, self.sy_ob_no: ob_no})
 
         #====================================================================================#
         #                           ----------PROBLEM 3----------
@@ -715,7 +713,7 @@ def main():
         processes.append(p)
         # if you comment in the line below, then the loop will block 
         # until this process finishes
-        p.join()
+        # p.join()
 
     for p in processes:
         p.join()
